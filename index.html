@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2c6e6a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="面接処理">
+<meta name="format-detection" content="telephone=no">
+<title>面接記録プロセッサ｜産業医面接の文字起こし処理</title>
+<style>
+  :root{
+    --paper:#eceef0; --card:#ffffff; --ink:#1c2a2a; --ink-soft:#4a5a59;
+    --line:#d5dcdb; --line-soft:#e4e9e8;
+    --teal:#2c6e6a; --teal-deep:#1f514e; --teal-wash:#e6efee;
+    --amber:#9a6a28; --amber-wash:#f6efe1;
+    --danger:#9e3b3b; --danger-wash:#f6e9e9;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --jp:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Noto Sans JP",system-ui,sans-serif;
+    --r:10px; --shadow:0 1px 2px rgba(28,42,42,.05),0 6px 20px rgba(28,42,42,.05);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:var(--jp); color:var(--ink); background:var(--paper);
+    line-height:1.7; -webkit-font-smoothing:antialiased; font-size:15px;
+  }
+  button{font-family:inherit}
+  textarea,input,select{font-family:inherit}
+
+  /* ---- top bar ---- */
+  header{
+    position:sticky; top:0; z-index:20;
+    background:rgba(236,238,240,.92); backdrop-filter:saturate(1.2) blur(8px);
+    border-bottom:1px solid var(--line); padding:10px 18px;
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  .brand{display:flex; align-items:baseline; gap:10px; margin-right:auto}
+  .brand h1{font-size:16px; font-weight:700; letter-spacing:.04em; margin:0}
+  .brand .sub{font-size:11px; color:var(--ink-soft); letter-spacing:.08em}
+  .badge{
+    font-size:10.5px; font-family:var(--mono); letter-spacing:.06em;
+    color:var(--amber); background:var(--amber-wash);
+    border:1px solid #e7d8bd; padding:3px 9px; border-radius:999px;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .badge::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--amber)}
+  .hbtn{
+    border:1px solid var(--line); background:var(--card); color:var(--ink-soft);
+    font-size:12.5px; padding:6px 12px; border-radius:8px; cursor:pointer;
+  }
+  .hbtn:hover{border-color:var(--teal); color:var(--teal)}
+
+  /* ---- layout ---- */
+  main{max-width:1180px; margin:0 auto; padding:20px 18px 80px;
+    display:grid; grid-template-columns:300px 1fr; gap:20px; align-items:start}
+  @media(max-width:840px){ main{grid-template-columns:1fr; gap:16px} }
+
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow)}
+  .panel-h{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:13px 16px; border-bottom:1px solid var(--line-soft);
+  }
+  .panel-h .t{font-size:12px; font-weight:700; letter-spacing:.12em; color:var(--ink-soft); text-transform:uppercase}
+  .panel-h .t .ja{font-size:13.5px; letter-spacing:.02em; color:var(--ink); text-transform:none; margin-left:2px}
+
+  /* ---- prompt library ---- */
+  .lib{position:sticky; top:62px}
+  .plist{padding:8px; display:flex; flex-direction:column; gap:6px; max-height:52vh; overflow:auto}
+  .pitem{
+    border:1px solid var(--line-soft); border-radius:8px; padding:10px 12px; cursor:pointer;
+    display:flex; gap:10px; align-items:flex-start; background:#fcfdfd; position:relative;
+  }
+  .pitem:hover{border-color:var(--teal)}
+  .pitem.sel{border-color:var(--teal); background:var(--teal-wash); box-shadow:inset 3px 0 0 var(--teal)}
+  .pitem .code{font-family:var(--mono); font-size:10.5px; color:var(--teal-deep);
+    background:#fff; border:1px solid var(--line); border-radius:5px; padding:1px 6px; margin-top:1px; flex:none}
+  .pitem .nm{font-size:13.5px; font-weight:600; line-height:1.45}
+  .pitem .ds{font-size:11.5px; color:var(--ink-soft); margin-top:2px}
+  .pitem .edit{
+    position:absolute; top:8px; right:8px; opacity:0; border:none; background:transparent;
+    font-size:11px; color:var(--ink-soft); cursor:pointer; padding:2px 4px;
+  }
+  .pitem:hover .edit{opacity:1}
+  .pitem .edit:hover{color:var(--teal)}
+  .lib-foot{padding:10px 12px; border-top:1px solid var(--line-soft)}
+  .addbtn{width:100%; border:1px dashed var(--line); background:#fafbfb; color:var(--ink-soft);
+    border-radius:8px; padding:9px; font-size:12.5px; cursor:pointer}
+  .addbtn:hover{border-color:var(--teal); color:var(--teal)}
+
+  /* ---- workspace ---- */
+  .ws{display:flex; flex-direction:column; gap:16px}
+  .field{padding:14px 16px}
+  label.lab{display:block; font-size:12px; font-weight:700; letter-spacing:.06em; color:var(--ink-soft); margin-bottom:7px}
+  .lab .hint{font-weight:400; color:#8a9897; letter-spacing:0; margin-left:6px}
+  textarea#src{
+    width:100%; min-height:230px; resize:vertical; border:1px solid var(--line);
+    border-radius:8px; padding:12px 13px; font-size:14px; line-height:1.7; color:var(--ink);
+    background:#fcfdfd;
+  }
+  textarea#src:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-wash)}
+  .meta{display:flex; align-items:center; gap:14px; margin-top:8px; font-size:11.5px; color:var(--ink-soft)}
+  .meta .ct{font-family:var(--mono)}
+  .clear{margin-left:auto; border:none; background:none; color:var(--ink-soft); cursor:pointer; font-size:11.5px; text-decoration:underline}
+  .clear:hover{color:var(--danger)}
+
+  /* mask rules */
+  .mask{border-top:1px solid var(--line-soft)}
+  .mask summary{cursor:pointer; padding:11px 16px; font-size:12.5px; color:var(--ink-soft); list-style:none; display:flex; align-items:center; gap:8px}
+  .mask summary::-webkit-details-marker{display:none}
+  .mask summary::before{content:"▸"; color:var(--teal); transition:transform .15s}
+  .mask[open] summary::before{transform:rotate(90deg)}
+  .mask .body{padding:0 16px 14px}
+  .mrow{display:flex; gap:8px; margin-bottom:7px}
+  .mrow input{flex:1; border:1px solid var(--line); border-radius:7px; padding:7px 9px; font-size:13px; background:#fcfdfd}
+  .mrow input:focus{outline:none; border-color:var(--teal)}
+  .mrow .x{flex:none; width:34px; border:1px solid var(--line); background:#fff; border-radius:7px; cursor:pointer; color:var(--ink-soft)}
+  .mrow .x:hover{border-color:var(--danger); color:var(--danger)}
+  .maskadd{font-size:12px; color:var(--teal); background:none; border:none; cursor:pointer; padding:2px 0}
+  .masknote{font-size:11px; color:#8a9897; margin-top:4px}
+
+  /* run bar */
+  .runbar{display:flex; align-items:center; gap:12px; padding:14px 16px; border-top:1px solid var(--line-soft); flex-wrap:wrap}
+  .sel-now{font-size:12.5px; color:var(--ink-soft); margin-right:auto}
+  .sel-now b{color:var(--ink); font-weight:600}
+  .run{
+    background:var(--teal); color:#fff; border:none; border-radius:9px;
+    padding:11px 26px; font-size:14px; font-weight:700; letter-spacing:.04em; cursor:pointer;
+    box-shadow:0 2px 8px rgba(44,110,106,.25);
+  }
+  .run:hover{background:var(--teal-deep)}
+  .run:disabled{background:#a9bcbb; box-shadow:none; cursor:not-allowed}
+
+  /* output */
+  #outwrap{display:none}
+  .out-h{display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid var(--line-soft)}
+  .out-h .t{font-size:12px; font-weight:700; letter-spacing:.12em; color:var(--ink-soft)}
+  .out-actions{display:flex; gap:8px}
+  .oa{border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:12px; padding:6px 11px; border-radius:7px; cursor:pointer}
+  .oa:hover{border-color:var(--teal); color:var(--teal)}
+  #out{padding:18px 18px 22px; font-size:14.5px; line-height:1.85; white-space:pre-wrap; word-break:break-word}
+  .spin{display:inline-block; width:15px; height:15px; border:2px solid #cfdedd; border-top-color:var(--teal); border-radius:50%; animation:sp .7s linear infinite; vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .err{margin:0 16px 16px; padding:11px 14px; background:var(--danger-wash); border:1px solid #e6c9c9; border-radius:8px; color:#7a2e2e; font-size:13px}
+
+  /* ---- modal ---- */
+  .scrim{position:fixed; inset:0; background:rgba(20,30,30,.45); display:none; align-items:flex-start; justify-content:center; z-index:50; padding:40px 16px; overflow:auto}
+  .scrim.on{display:flex}
+  .modal{background:var(--card); border-radius:14px; width:100%; max-width:560px; box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal-h{padding:16px 20px; border-bottom:1px solid var(--line-soft); display:flex; align-items:center; justify-content:space-between}
+  .modal-h h3{margin:0; font-size:15px; letter-spacing:.02em}
+  .modal-h .close{border:none; background:none; font-size:20px; color:var(--ink-soft); cursor:pointer; line-height:1}
+  .modal-b{padding:18px 20px}
+  .modal-b label{display:block; font-size:12.5px; font-weight:700; color:var(--ink-soft); margin:0 0 6px}
+  .modal-b input[type=text],.modal-b textarea,.modal-b select{
+    width:100%; border:1px solid var(--line); border-radius:8px; padding:9px 11px; font-size:14px; background:#fcfdfd; margin-bottom:14px}
+  .modal-b textarea{min-height:150px; resize:vertical; line-height:1.7}
+  .modal-b input:focus,.modal-b textarea:focus,.modal-b select:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-wash)}
+  .modal-f{padding:14px 20px; border-top:1px solid var(--line-soft); display:flex; gap:10px; align-items:center}
+  .modal-f .del{margin-right:auto; border:1px solid var(--line); background:#fff; color:var(--danger); border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer}
+  .modal-f .del:hover{background:var(--danger-wash)}
+  .modal-f .cancel{border:1px solid var(--line); background:#fff; color:var(--ink-soft); border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer}
+  .modal-f .save{border:none; background:var(--teal); color:#fff; border-radius:8px; padding:8px 20px; font-size:13.5px; font-weight:700; cursor:pointer}
+  .modal-f .save:hover{background:var(--teal-deep)}
+  .keynote{font-size:11.5px; color:#8a9897; margin:-6px 0 14px; line-height:1.6}
+  .keynote a{color:var(--teal)}
+
+  .toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px;
+    opacity:0; pointer-events:none; transition:.2s; z-index:90}
+  .toast.on{opacity:1; transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>面接記録プロセッサ</h1>
+    <span class="sub">産業医面接ノート</span>
+  </div>
+  <span class="badge">ローカル動作・送信先はGeminiのみ</span>
+  <button class="hbtn" id="settingsBtn">⚙ API設定</button>
+</header>
+
+<main>
+  <!-- prompt library -->
+  <section class="panel lib">
+    <div class="panel-h"><div class="t">PROMPTS<span class="ja">プロンプト</span></div></div>
+    <div class="plist" id="plist"></div>
+    <div class="lib-foot"><button class="addbtn" id="addPrompt">＋ プロンプトを追加</button></div>
+  </section>
+
+  <!-- workspace -->
+  <div class="ws">
+    <section class="panel">
+      <div class="field">
+        <label class="lab" for="src">文字起こしテキスト<span class="hint">iPhoneのボイスメモ等から貼り付け</span></label>
+        <textarea id="src" placeholder="面接の文字起こしをここに貼り付けてください…"></textarea>
+        <div class="meta">
+          <span class="ct"><span id="cc">0</span> 文字</span>
+          <button class="clear" id="clearSrc">クリア</button>
+        </div>
+      </div>
+
+      <details class="mask">
+        <summary>仮名化ルール（任意）— 送信前に院内で置換</summary>
+        <div class="body">
+          <div id="maskRows"></div>
+          <button class="maskadd" id="addMask">＋ ルールを追加</button>
+          <div class="masknote">例：「山田太郎」→「A氏」。送信直前にブラウザ内で置換してからGeminiへ送ります（元テキストはそのまま残ります）。</div>
+        </div>
+      </details>
+
+      <div class="runbar">
+        <div class="sel-now">使用プロンプト：<b id="selName">未選択</b></div>
+        <button class="run" id="runBtn" disabled>処理する</button>
+      </div>
+    </section>
+
+    <section class="panel" id="outwrap">
+      <div class="out-h">
+        <div class="t">OUTPUT｜処理結果</div>
+        <div class="out-actions">
+          <button class="oa" id="copyOut">コピー</button>
+          <button class="oa" id="dlOut">.txt保存</button>
+        </div>
+      </div>
+      <div id="errSlot"></div>
+      <div id="out"></div>
+    </section>
+  </div>
+</main>
+
+<!-- prompt editor modal -->
+<div class="scrim" id="promptScrim">
+  <div class="modal">
+    <div class="modal-h"><h3 id="pmTitle">プロンプトを編集</h3><button class="close" data-close-prompt>×</button></div>
+    <div class="modal-b">
+      <label>名称</label>
+      <input type="text" id="pmName" placeholder="例：面接記録の要約（SOAP）">
+      <label>短縮コード <span style="font-weight:400;color:#8a9897">（任意・一覧に表示）</span></label>
+      <input type="text" id="pmCode" placeholder="例：SUM" maxlength="6">
+      <label>プロンプト本文</label>
+      <textarea id="pmBody" placeholder="このテキストの直後に文字起こし本文が連結されて送信されます。"></textarea>
+    </div>
+    <div class="modal-f">
+      <button class="del" id="pmDelete">削除</button>
+      <button class="cancel" data-close-prompt>キャンセル</button>
+      <button class="save" id="pmSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- settings modal -->
+<div class="scrim" id="setScrim">
+  <div class="modal">
+    <div class="modal-h"><h3>API設定</h3><button class="close" data-close-set>×</button></div>
+    <div class="modal-b">
+      <label>Gemini APIキー</label>
+      <input type="text" id="apiKey" placeholder="AIza… で始まるキー" autocomplete="off" spellcheck="false">
+      <div class="keynote">キーはこのブラウザ内（localStorage）にのみ保存され、外部には送られません。取得：<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a></div>
+      <label>モデル</label>
+      <select id="model">
+        <option value="gemini-2.5-flash">gemini-2.5-flash（標準・低コスト）</option>
+        <option value="gemini-3.5-flash">gemini-3.5-flash（最新・高性能）</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（最速・最安）</option>
+        <option value="gemini-2.5-pro">gemini-2.5-pro（最高精度）</option>
+        <option value="gemini-flash-latest">gemini-flash-latest（最新エイリアス）</option>
+      </select>
+      <label>共通の前提指示 <span style="font-weight:400;color:#8a9897">（全プロンプトに適用）</span></label>
+      <textarea id="sysInst" style="min-height:90px"></textarea>
+    </div>
+    <div class="modal-f">
+      <button class="cancel" data-close-set>閉じる</button>
+      <button class="save" id="setSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const LS = {
+    prompts:"mnp_prompts", key:"mnp_apikey", model:"mnp_model",
+    sys:"mnp_sysinst", masks:"mnp_masks", sel:"mnp_sel"
+  };
+
+  const DEFAULT_SYS =
+    "あなたは経験豊富な産業医の記録作成を補助するアシスタントです。"+
+    "提供された面接の文字起こしのみに基づき、事実を脚色せず、記載のない事項を創作しないでください。"+
+    "不明・未聴取の項目は「記載なし」と明示します。出力は日本語の簡潔な業務文書とし、診断の断定は避け、産業医の判断を補助する整理に徹してください。";
+
+  const DEFAULT_PROMPTS = [
+    { id:id(), code:"要約", name:"面接記録の要約（構造化）",
+      desc:"主訴・経過・就業状況・所見・方針に整理",
+      body:"以下の産業医面接の文字起こしを、次の見出しで構造化して要約してください。\n■主訴／相談内容\n■経過・背景\n■現在の心身の状況（自覚症状・睡眠・気分・身体）\n■就業状況（業務内容・労働時間・職場環境・対人関係）\n■産業医所見\n■対応方針・本人への助言\n各項目は箇条書きで簡潔に。記載のない項目は「記載なし」と記してください。" },
+    { id:id(), code:"措置", name:"就業上の措置に関する意見（ドラフト）",
+      desc:"就業区分・配慮事項・措置案の素案",
+      body:"以下の面接内容をもとに、就業上の措置に関する産業医意見書のドラフトを作成してください。\n■就業区分の案（通常勤務／就業制限／要休業 のいずれか＋理由）\n■具体的な配慮・制限事項（時間外労働、深夜業、出張、業務量・内容の調整など）\n■想定される期間と次回評価の目安\n■人事・上司への伝達文案（医学的情報を除いた配慮依頼の形で）\nあくまで素案であり、最終判断は産業医が行う前提で記述してください。" },
+    { id:id(), code:"長時間", name:"長時間労働者面接の記録整理",
+      desc:"労働時間・疲労蓄積・措置の観点で整理",
+      body:"長時間労働者に対する面接指導の文字起こしを、次の観点で整理してください。\n■申告された労働時間・勤務状況\n■疲労蓄積度（自覚症状、睡眠、休養の取得状況）\n■身体・精神面の所見\n■受診の要否、就業上の措置の要否\n■本人への指導・助言内容\n記載のない項目は「記載なし」としてください。" },
+    { id:id(), code:"高STR", name:"高ストレス者面接の記録整理",
+      desc:"ストレス要因・心身状況・必要な対応",
+      body:"ストレスチェック後の高ストレス者面接の文字起こしを、次の観点で整理してください。\n■主なストレス要因（仕事の量・質、対人関係、役割、職場環境など）\n■心身の状況（自覚症状、睡眠、気分の変化）\n■周囲のサポート状況\n■医療機関受診の要否と緊急性の評価\n■就業上の措置・セルフケア助言\n断定的な診断は避け、産業医が判断するための整理としてください。" },
+    { id:id(), code:"復職", name:"復職面談の記録整理",
+      desc:"回復状況・就業可否・段階的復帰プラン",
+      body:"復職（職場復帰）面談の文字起こしを、次の観点で整理してください。\n■病状・回復状況（睡眠、生活リズム、症状の安定度）\n■本人の復職意欲と職場への懸念\n■現時点での就業可否の評価\n■段階的な復帰プラン案（勤務時間・業務内容の段階設定）\n■フォローアップの間隔と確認事項\n記載のない項目は「記載なし」としてください。" },
+    { id:id(), code:"TODO", name:"フォローアップ事項の抽出",
+      desc:"次回までのToDo・再面談時期・連携先",
+      body:"以下の面接の文字起こしから、フォローアップに必要な事項のみを抽出して箇条書きにしてください。\n・次回面談までに本人/産業医/人事が行うべきこと\n・推奨される再面談の時期\n・連携が必要な関係者（主治医、人事、上司、保健師など）\n・経過観察すべき具体的な指標\n面接で触れられていない推測は加えないでください。" }
+  ];
+
+  function id(){ return "p"+Math.random().toString(36).slice(2,9); }
+  function load(k,f){ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v); }catch(e){ return f; } }
+  function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+
+  let prompts = load(LS.prompts, null) || DEFAULT_PROMPTS;
+  let selId   = load(LS.sel, null);
+  let masks   = load(LS.masks, []);
+
+  /* ---------- prompt library ---------- */
+  function renderLib(){
+    const wrap = $("#plist"); wrap.innerHTML="";
+    prompts.forEach(p=>{
+      const el = document.createElement("div");
+      el.className = "pitem"+(p.id===selId?" sel":"");
+      el.innerHTML =
+        `<span class="code">${esc(p.code||"–")}</span>
+         <div style="min-width:0">
+           <div class="nm">${esc(p.name)}</div>
+           ${p.desc?`<div class="ds">${esc(p.desc)}</div>`:""}
+         </div>
+         <button class="edit" title="編集">編集</button>`;
+      el.addEventListener("click",e=>{
+        if(e.target.classList.contains("edit")){ openPrompt(p.id); return; }
+        selId = p.id; save(LS.sel,selId); renderLib(); syncSel();
+      });
+      wrap.appendChild(el);
+    });
+    syncSel();
+  }
+  function syncSel(){
+    const p = prompts.find(x=>x.id===selId);
+    $("#selName").textContent = p?p.name:"未選択";
+    $("#runBtn").disabled = !p || !$("#src").value.trim();
+  }
+
+  /* ---------- prompt editor ---------- */
+  let editingId = null;
+  function openPrompt(pid){
+    editingId = pid;
+    const p = prompts.find(x=>x.id===pid);
+    $("#pmTitle").textContent = p?"プロンプトを編集":"プロンプトを追加";
+    $("#pmName").value = p?p.name:"";
+    $("#pmCode").value = p?(p.code||""):"";
+    $("#pmBody").value = p?p.body:"";
+    $("#pmDelete").style.display = p?"block":"none";
+    $("#promptScrim").classList.add("on");
+    $("#pmName").focus();
+  }
+  $("#addPrompt").addEventListener("click",()=>openPrompt(null));
+  $("#pmSave").addEventListener("click",()=>{
+    const name=$("#pmName").value.trim();
+    const body=$("#pmBody").value.trim();
+    if(!name||!body){ toast("名称と本文を入力してください"); return; }
+    const code=$("#pmCode").value.trim();
+    if(editingId){
+      const p=prompts.find(x=>x.id===editingId);
+      p.name=name; p.body=body; p.code=code; p.desc=p.desc||"";
+    }else{
+      const np={id:id(),name,body,code,desc:""};
+      prompts.push(np); selId=np.id; save(LS.sel,selId);
+    }
+    save(LS.prompts,prompts); closePrompt(); renderLib();
+  });
+  $("#pmDelete").addEventListener("click",()=>{
+    if(!editingId) return;
+    if(!confirm("このプロンプトを削除しますか？")) return;
+    prompts = prompts.filter(x=>x.id!==editingId);
+    if(selId===editingId){ selId=null; save(LS.sel,selId); }
+    save(LS.prompts,prompts); closePrompt(); renderLib();
+  });
+  function closePrompt(){ $("#promptScrim").classList.remove("on"); editingId=null; }
+  document.querySelectorAll("[data-close-prompt]").forEach(b=>b.addEventListener("click",closePrompt));
+
+  /* ---------- masking rules ---------- */
+  function renderMasks(){
+    const wrap=$("#maskRows"); wrap.innerHTML="";
+    masks.forEach((m,i)=>{
+      const row=document.createElement("div"); row.className="mrow";
+      row.innerHTML=
+        `<input placeholder="元の語" value="${esc(m.from)}" data-i="${i}" data-f="from">
+         <input placeholder="置換後" value="${esc(m.to)}" data-i="${i}" data-f="to">
+         <button class="x" data-i="${i}" title="削除">×</button>`;
+      wrap.appendChild(row);
+    });
+    wrap.querySelectorAll("input").forEach(inp=>{
+      inp.addEventListener("input",e=>{
+        masks[+e.target.dataset.i][e.target.dataset.f]=e.target.value; save(LS.masks,masks);
+      });
+    });
+    wrap.querySelectorAll(".x").forEach(b=>{
+      b.addEventListener("click",e=>{ masks.splice(+e.target.dataset.i,1); save(LS.masks,masks); renderMasks(); });
+    });
+  }
+  $("#addMask").addEventListener("click",()=>{ masks.push({from:"",to:""}); save(LS.masks,masks); renderMasks(); });
+  function applyMasks(t){
+    masks.forEach(m=>{ if(m.from){ t=t.split(m.from).join(m.to); } });
+    return t;
+  }
+
+  /* ---------- source textarea ---------- */
+  const src=$("#src");
+  src.addEventListener("input",()=>{ $("#cc").textContent=src.value.length; syncSel(); });
+  $("#clearSrc").addEventListener("click",()=>{ src.value=""; $("#cc").textContent=0; syncSel(); });
+
+  /* ---------- settings ---------- */
+  $("#apiKey").value = load(LS.key,"")||"";
+  $("#model").value  = load(LS.model,"gemini-2.5-flash")||"gemini-2.5-flash";
+  $("#sysInst").value= load(LS.sys,null)||DEFAULT_SYS;
+  $("#settingsBtn").addEventListener("click",()=>$("#setScrim").classList.add("on"));
+  $("#setSave").addEventListener("click",()=>{
+    save(LS.key,$("#apiKey").value.trim());
+    save(LS.model,$("#model").value);
+    save(LS.sys,$("#sysInst").value.trim()||DEFAULT_SYS);
+    $("#setScrim").classList.remove("on"); toast("設定を保存しました");
+  });
+  document.querySelectorAll("[data-close-set]").forEach(b=>b.addEventListener("click",()=>$("#setScrim").classList.remove("on")));
+
+  /* ---------- run ---------- */
+  $("#runBtn").addEventListener("click",runProcess);
+  async function runProcess(){
+    const p = prompts.find(x=>x.id===selId);
+    const apiKey = load(LS.key,"");
+    const model  = load(LS.model,"gemini-2.5-flash");
+    const sys    = load(LS.sys,null)||DEFAULT_SYS;
+    if(!apiKey){ $("#setScrim").classList.add("on"); toast("先にAPIキーを設定してください"); return; }
+    if(!p){ toast("プロンプトを選択してください"); return; }
+
+    const raw = src.value.trim();
+    if(!raw){ toast("文字起こしを入力してください"); return; }
+    const text = applyMasks(raw);
+
+    const userContent = p.body + "\n\n――― 面接の文字起こし ―――\n" + text;
+
+    $("#outwrap").style.display="block";
+    $("#errSlot").innerHTML="";
+    $("#out").innerHTML='<span class="spin"></span> <span style="color:#4a5a59">処理中…（'+esc(model)+'）</span>';
+    $("#runBtn").disabled=true;
+    $("#outwrap").scrollIntoView({behavior:"smooth",block:"start"});
+
+    try{
+      const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent",
+        { method:"POST",
+          headers:{ "Content-Type":"application/json", "x-goog-api-key":apiKey },
+          body: JSON.stringify({
+            systemInstruction:{ parts:[{text:sys}] },
+            contents:[{ role:"user", parts:[{text:userContent}] }],
+            generationConfig:{ temperature:0.3, topP:0.9 }
+          })
+        });
+      const data = await res.json();
+      if(!res.ok){
+        const msg = (data && data.error && data.error.message) || ("HTTP "+res.status);
+        throw new Error(msg);
+      }
+      const cand = data.candidates && data.candidates[0];
+      let outText = "";
+      if(cand && cand.content && cand.content.parts){
+        outText = cand.content.parts.map(x=>x.text||"").join("");
+      }
+      if(!outText){
+        const fr = cand && cand.finishReason;
+        outText = fr==="SAFETY" ? "（安全性フィルタにより応答が制限されました。文面を調整して再試行してください。）"
+                : fr==="MAX_TOKENS" ? "（出力が長く途中で打ち切られました。）"
+                : "（応答が空でした。）";
+      }
+      $("#out").textContent = outText;
+    }catch(err){
+      $("#out").innerHTML="";
+      let hint="";
+      const m=String(err.message||err);
+      if(/API key not valid|API_KEY_INVALID|400/.test(m)) hint="　APIキーが無効な可能性があります。設定を確認してください。";
+      else if(/429|RESOURCE_EXHAUSTED|quota/i.test(m)) hint="　レート上限／無料枠に達した可能性があります。少し待つかモデルを変更してください。";
+      else if(/Failed to fetch|NetworkError/i.test(m)) hint="　ネットワークに接続できません（オフライン時はAPIを呼べません）。";
+      $("#errSlot").innerHTML='<div class="err">エラー：'+esc(m)+hint+'</div>';
+    }finally{
+      $("#runBtn").disabled=false; syncSel();
+    }
+  }
+
+  /* ---------- output actions ---------- */
+  $("#copyOut").addEventListener("click",()=>{
+    const t=$("#out").textContent||"";
+    navigator.clipboard.writeText(t).then(()=>toast("コピーしました")).catch(()=>toast("コピーできませんでした"));
+  });
+  $("#dlOut").addEventListener("click",()=>{
+    const t=$("#out").textContent||""; if(!t) return;
+    const p=prompts.find(x=>x.id===selId);
+    const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,"-");
+    const blob=new Blob([t],{type:"text/plain;charset=utf-8"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=(p?p.name:"output")+"_"+stamp+".txt";
+    a.click(); URL.revokeObjectURL(a.href);
+  });
+
+  /* ---------- util ---------- */
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  let tt;
+  function toast(msg){ const el=$("#toast"); el.textContent=msg; el.classList.add("on"); clearTimeout(tt); tt=setTimeout(()=>el.classList.remove("on"),1900); }
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closePrompt(); $("#setScrim").classList.remove("on"); } });
+
+  /* ---------- deep-link import (ショートカット連携) ---------- */
+  function importFromURL(){
+    try{
+      var h=(location.hash||"").replace(/^#/,"");
+      if(!h) return;
+      var params={};
+      h.split("&").forEach(function(kv){ var i=kv.indexOf("="); if(i>0){ params[kv.slice(0,i)]=kv.slice(i+1); } });
+      var filled=false;
+      if(params.t!=null){
+        var t=decodeURIComponent(params.t.replace(/\+/g," "));
+        if(t){ src.value=t; $("#cc").textContent=src.value.length; filled=true; }
+      }
+      if(params.p!=null){
+        var want=decodeURIComponent(params.p.replace(/\+/g," ")).trim();
+        var hit=prompts.find(function(x){ return x.code===want||x.name===want; });
+        if(hit){ selId=hit.id; save(LS.sel,selId); renderLib(); }
+      }
+      history.replaceState(null,"",location.pathname+location.search); // テキストをURLに残さない
+      syncSel();
+      if(filled && params.run==="1" && selId && load(LS.key,"") && src.value.trim()){
+        setTimeout(runProcess,250);
+      }
+    }catch(e){}
+  }
+
+  /* ---------- init ---------- */
+  if(!load(LS.prompts,null)) save(LS.prompts,prompts);
+  renderLib(); renderMasks(); importFromURL();
+})();
+</script>
+</body>
+</html>
