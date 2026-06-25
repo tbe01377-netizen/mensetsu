@@ -132,6 +132,21 @@
   .maskadd{font-size:12px; color:var(--teal); background:none; border:none; cursor:pointer; padding:2px 0}
   .masknote{font-size:11px; color:#8a9897; margin-top:4px}
 
+  /* meeting info */
+  details.info{border-bottom:1px solid var(--line-soft)}
+  details.info > summary{cursor:pointer; padding:12px 16px; font-size:14px; font-weight:700; letter-spacing:.04em; color:var(--teal-deep); background:var(--teal-wash); list-style:none; display:flex; align-items:center; gap:8px}
+  details.info > summary::-webkit-details-marker{display:none}
+  details.info > summary::before{content:"▸"; color:var(--teal); transition:transform .15s}
+  details.info[open] > summary::before{transform:rotate(90deg)}
+  details.info > summary .note{font-weight:400; color:#8a9897; font-size:11px}
+  .info-grid{padding:2px 16px 14px; display:grid; grid-template-columns:1fr 1fr; gap:10px 12px}
+  .info-grid .fld{display:flex; flex-direction:column; gap:4px; min-width:0}
+  .info-grid .fld.wide{grid-column:1 / -1}
+  .info-grid label{font-size:11px; font-weight:700; color:var(--ink-soft); letter-spacing:.04em}
+  .info-grid input{border:1px solid var(--line); border-radius:7px; padding:8px 10px; font-size:14px; background:#fcfdfd; width:100%}
+  .info-grid input:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-wash)}
+  @media(max-width:480px){ .info-grid{grid-template-columns:1fr} }
+
   /* run bar */
   .runbar{display:flex; align-items:center; gap:12px; padding:14px 16px; border-top:1px solid var(--line-soft); flex-wrap:wrap}
   .sel-now{font-size:12.5px; color:var(--ink-soft); margin-right:auto}
@@ -212,6 +227,16 @@
   <!-- workspace -->
   <div class="ws">
     <section class="panel">
+      <details class="info" open>
+        <summary>面談情報 <span class="note">（結果の冒頭に記載／Geminiには送りません）</span></summary>
+        <div class="info-grid">
+          <div class="fld"><label for="mDate">相談日</label><input type="date" id="mDate"></div>
+          <div class="fld"><label for="mName">相談者氏名</label><input type="text" id="mName" placeholder="例：山田 太郎" autocomplete="off"></div>
+          <div class="fld wide"><label for="mAff">所属</label><input type="text" id="mAff" placeholder="例：○○株式会社 製造部" autocomplete="off"></div>
+          <div class="fld"><label for="mDoc">産業医名</label><input type="text" id="mDoc" placeholder="例：近藤 ○○" autocomplete="off"></div>
+          <div class="fld"><label for="mNurse">保健師名</label><input type="text" id="mNurse" placeholder="例：△△ △△" autocomplete="off"></div>
+        </div>
+      </details>
       <div class="field">
         <label class="lab" for="src">文字起こしテキスト<span class="hint">iPhoneのボイスメモ等から貼り付け</span></label>
         <textarea id="src" placeholder="面接の文字起こしをここに貼り付けてください…"></textarea>
@@ -309,7 +334,8 @@
   const $ = s => document.querySelector(s);
   const LS = {
     prompts:"mnp_prompts", key:"mnp_apikey", model:"mnp_model",
-    sys:"mnp_sysinst", masks:"mnp_masks", sel:"mnp_sel"
+    sys:"mnp_sysinst", masks:"mnp_masks", sel:"mnp_sel",
+    doctor:"mnp_doctor", nurse:"mnp_nurse"
   };
 
   const DEFAULT_SYS =
@@ -446,6 +472,27 @@
   src.addEventListener("input",()=>{ $("#cc").textContent=src.value.length; syncSel(); });
   $("#clearSrc").addEventListener("click",()=>{ src.value=""; $("#cc").textContent=0; syncSel(); });
 
+  /* ---------- meeting info ---------- */
+  function todayLocal(){ var t=new Date(); t.setMinutes(t.getMinutes()-t.getTimezoneOffset()); return t.toISOString().slice(0,10); }
+  function fmtDate(s){ var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s); return m?(m[1]+"年"+(+m[2])+"月"+(+m[3])+"日"):s; }
+  // 産業医名・保健師名は固定が多いので記憶。日付は当日を既定。氏名・所属は記憶しない。
+  $("#mDoc").value   = load(LS.doctor,"")||"";
+  $("#mNurse").value = load(LS.nurse,"")||"";
+  if(!$("#mDate").value){ $("#mDate").value = todayLocal(); }
+  $("#mDoc").addEventListener("input",  ()=>save(LS.doctor,$("#mDoc").value));
+  $("#mNurse").addEventListener("input",()=>save(LS.nurse,$("#mNurse").value));
+  function buildHeader(){
+    var d=$("#mDate").value.trim(), aff=$("#mAff").value.trim(), nm=$("#mName").value.trim();
+    var doc=$("#mDoc").value.trim(), nur=$("#mNurse").value.trim();
+    var lines=[];
+    if(d)        lines.push("相談日　："+fmtDate(d));
+    if(aff||nm)  lines.push("相談者　："+[aff,nm].filter(Boolean).join("　"));
+    if(doc)      lines.push("産業医　："+doc);
+    if(nur)      lines.push("保健師　："+nur);
+    if(!lines.length) return "";
+    return lines.join("\n")+"\n"+"─".repeat(22);
+  }
+
   /* ---------- settings ---------- */
   $("#apiKey").value = load(LS.key,"")||"";
   $("#model").value  = load(LS.model,"gemini-2.5-flash")||"gemini-2.5-flash";
@@ -507,7 +554,8 @@
                 : fr==="MAX_TOKENS" ? "（出力が長く途中で打ち切られました。）"
                 : "（応答が空でした。）";
       }
-      $("#out").textContent = outText;
+      var header = buildHeader();
+      $("#out").textContent = header ? (header + "\n\n" + outText) : outText;
     }catch(err){
       $("#out").innerHTML="";
       let hint="";
@@ -532,11 +580,13 @@
   $("#dlOut").addEventListener("click",()=>{
     const t=$("#out").textContent||""; if(!t) return;
     const p=prompts.find(x=>x.id===selId);
-    const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,"-");
+    const who=$("#mName").value.trim();
+    const day=$("#mDate").value.trim() || new Date().toISOString().slice(0,10);
+    const base=(who || (p?p.name:"面談記録")).replace(/[\\/:*?"<>|]/g,"_");
     const blob=new Blob([t],{type:"text/plain;charset=utf-8"});
     const a=document.createElement("a");
     a.href=URL.createObjectURL(blob);
-    a.download=(p?p.name:"output")+"_"+stamp+".txt";
+    a.download=base+"_"+day+".txt";
     a.click(); URL.revokeObjectURL(a.href);
   });
 
